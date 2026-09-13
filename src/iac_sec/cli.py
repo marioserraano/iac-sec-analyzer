@@ -14,6 +14,12 @@ app = typer.Typer(
 )
 console = Console()
 
+# Main callback function
+@app.callback()
+def main():
+    """Main entrypoint for the CLI."""
+    pass
+
 @app.command()
 def analyze(
     file_path: str = typer.Argument(..., help="Path to the Terraform (.tf) file to analyze.")
