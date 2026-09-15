@@ -1,18 +1,29 @@
 import typer
 import asyncio
+from enum import Enum
 from rich.console import Console
 from rich.spinner import Spinner
 
 from iac_sec.parser.hcl_parser import TerraformParser, HclParsingError
 from iac_sec.analyzer.engine import SecurityAnalyzer
 from iac_sec.reporter.console import ConsoleReporter
+from iac_sec.reporter.markdown import MarkdownReporter
+from iac_sec.reporter.json_out import JsonReporter
+
+# Create an Enum for our format choices to get automatic CLI validation
+class OutputFormat(str, Enum):
+    CONSOLE = "console"
+    JSON = "json"
+    MARKDOWN = "markdown"
 
 # Initialize the Typer app
 app = typer.Typer(
     help="AI-powered Infrastructure as Code (IaC) Security Analyzer.",
     add_completion=False,
 )
-console = Console()
+
+# Send UI logs to stderr so they don't corrupt pure data exports (stdout)
+console = Console(stderr=True)
 
 # Main callback function
 @app.callback()
@@ -22,7 +33,12 @@ def main():
 
 @app.command()
 def analyze(
-    file_path: str = typer.Argument(..., help="Path to the Terraform (.tf) file to analyze.")
+    file_path: str = typer.Argument(..., help="Path to the Terraform (.tf) file to analyze."),
+    format: OutputFormat = typer.Option(
+        OutputFormat.CONSOLE, 
+        "--format", "-f", 
+        help="Output format (console, json, markdown)."
+    )
 ):
     """
     Parses a Terraform file and analyzes it for security vulnerabilities using an LLM.
@@ -43,9 +59,15 @@ def analyze(
                 # Await the AI's response while showing a loading animation
                 report = await analyzer.analyze(parsed_hcl=parsed_data)
                 
-            # Phase 5: Display the results
+            # Phase 5: Display the results based on the chosen format strategy
             console.print("[bold green]>[/bold green] Analysis complete!\n")
-            ConsoleReporter.print_report(report)
+            
+            if format == OutputFormat.JSON:
+                print(JsonReporter.generate(report))
+            elif format == OutputFormat.MARKDOWN:
+                print(MarkdownReporter.generate(report))
+            else:
+                ConsoleReporter.print_report(report)
             
         except FileNotFoundError as e:
             console.print(f"[bold red]Error:[/bold red] {str(e)}")
