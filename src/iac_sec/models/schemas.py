@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 class SeverityLevel(str, Enum):
     """Enumeration for vulnerability severity levels."""
@@ -49,10 +49,16 @@ class SecurityReport(BaseModel):
         description="The name of the analyzed Terraform file."
     )
     total_issues_found: int = Field(
-        ..., 
+        default=0, 
         description="Total number of vulnerabilities identified."
     )
     vulnerabilities: List[Vulnerability] = Field(
         ..., 
         description="List of all detected vulnerabilities."
     )
+
+    @model_validator(mode='after')
+    def calculate_totals(self) -> 'SecurityReport':
+        """Forces the correct mathematical count, overwriting any LLM hallucination."""
+        self.total_issues_found = len(self.vulnerabilities)
+        return self
