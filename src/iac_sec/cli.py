@@ -1,6 +1,7 @@
 import typer
 import asyncio
 from enum import Enum
+from typing import Optional
 from rich.console import Console
 from rich.spinner import Spinner
 
@@ -38,6 +39,11 @@ def analyze(
         OutputFormat.CONSOLE, 
         "--format", "-f", 
         help="Output format (console, json, markdown)."
+    ),
+    policy_file: Optional[str] = typer.Option(
+        None,
+        "--policy", "-p",
+        help="Path to a text file containing custom company security policies."
     )
 ):
     """
@@ -48,18 +54,29 @@ def analyze(
     # but our engine's analyze() method is asynchronous.
     async def _run_analysis() -> None:
         try:
+            # Phase 0: Load custom policies if provided
+            custom_policy_text = None
+            if policy_file:
+                try:
+                    with open(policy_file, "r", encoding="utf-8") as f:
+                        custom_policy_text = f.read()
+                    console.print(f"[bold cyan]>[/bold cyan] Loaded custom policy from: {policy_file}")
+                except FileNotFoundError:
+                    console.print(f"[bold red]Error:[/bold red] Policy file '{policy_file}' not found.")
+                    raise typer.Exit(code=1)
+
             # Phase 1: Parse the HCL file
             console.print(f"[bold blue]>[/bold blue] Parsing Terraform file: {file_path}...")
             parsed_data = TerraformParser.parse_file(file_path)
             
-            # Phase 2 & 4: Initialize engine and run analysis
-            analyzer = SecurityAnalyzer(filename=file_path)
+            # Phase 2 & 3: Initialize engine and run analysis
+            analyzer = SecurityAnalyzer(filename=file_path, custom_policy=custom_policy_text)
             
             with console.status("[bold yellow]Analyzing infrastructure context using local LLM...[/bold yellow]", spinner="dots"):
                 # Await the AI's response while showing a loading animation
                 report = await analyzer.analyze(parsed_hcl=parsed_data)
                 
-            # Phase 5: Display the results based on the chosen format strategy
+            # Phase 4: Display the results based on the chosen format strategy
             console.print("[bold green]>[/bold green] Analysis complete!\n")
             
             if format == OutputFormat.JSON:
