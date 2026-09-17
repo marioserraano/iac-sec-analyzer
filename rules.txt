@@ -1,0 +1,1 @@
+All AWS Security Groups must have a description that starts exactly with "PROD-".

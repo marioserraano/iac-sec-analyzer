@@ -2,6 +2,7 @@ import typer
 import asyncio
 from enum import Enum
 from typing import Optional
+from pathlib import Path
 from rich.console import Console
 from rich.spinner import Spinner
 
@@ -34,7 +35,7 @@ def main():
 
 @app.command()
 def analyze(
-    file_path: str = typer.Argument(..., help="Path to the Terraform (.tf) file to analyze."),
+    path: str = typer.Argument(..., help="Path to a Terraform (.tf) file or a directory to scan recursively."),
     format: OutputFormat = typer.Option(
         OutputFormat.CONSOLE, 
         "--format", "-f", 
@@ -47,7 +48,7 @@ def analyze(
     )
 ):
     """
-    Parses a Terraform file and analyzes it for security vulnerabilities using an LLM.
+    Parses a Terraform file or directory and analyzes it for security vulnerabilities using an LLM.
     """
     
     # We define an internal async function because Typer runs synchronously by default,
@@ -65,26 +66,50 @@ def analyze(
                     console.print(f"[bold red]Error:[/bold red] Policy file '{policy_file}' not found.")
                     raise typer.Exit(code=1)
 
-            # Phase 1: Parse the HCL file
-            console.print(f"[bold blue]>[/bold blue] Parsing Terraform file: {file_path}...")
-            parsed_data = TerraformParser.parse_file(file_path)
-            
-            # Phase 2 & 3: Initialize engine and run analysis
-            analyzer = SecurityAnalyzer(filename=file_path, custom_policy=custom_policy_text)
-            
-            with console.status("[bold yellow]Analyzing infrastructure context using local LLM...[/bold yellow]", spinner="dots"):
-                # Await the AI's response while showing a loading animation
-                report = await analyzer.analyze(parsed_hcl=parsed_data)
-                
-            # Phase 4: Display the results based on the chosen format strategy
-            console.print("[bold green]>[/bold green] Analysis complete!\n")
-            
-            if format == OutputFormat.JSON:
-                print(JsonReporter.generate(report))
-            elif format == OutputFormat.MARKDOWN:
-                print(MarkdownReporter.generate(report))
+            # Phase 1: Path Resolution & Discovery
+            target_path = Path(path)
+            tf_files = []
+
+            if target_path.is_file() and target_path.suffix == '.tf':
+                tf_files = [target_path]
+            elif target_path.is_dir():
+                # rglob() searches for all matching files in the directory AND all subdirectories
+                tf_files = list(target_path.rglob("*.tf"))
             else:
-                ConsoleReporter.print_report(report)
+                console.print(f"[bold red]Error:[/bold red] '{path}' is not a valid .tf file or directory.")
+                raise typer.Exit(code=1)
+
+            if not tf_files:
+                console.print(f"[bold yellow]Warning:[/bold yellow] No .tf files found in '{path}'.")
+                raise typer.Exit(code=0)
+
+            console.print(f"[bold magenta]>[/bold magenta] Discovered {len(tf_files)} Terraform file(s) for analysis.\n")
+
+            # Phase 2 & 3: Iterate, Parse, and Analyze (Streaming)
+            for file_path in tf_files:
+                file_str = str(file_path)
+                
+                # Phase 1: Parse the HCL file
+                console.print(f"[bold blue]>[/bold blue] Parsing Terraform file: {file_str}...")
+                parsed_data = TerraformParser.parse_file(file_str)
+                
+                # Phase 2 & 3: Initialize engine and run analysis
+                # We pass file_path.name so the report only shows the file name, not the huge full path
+                analyzer = SecurityAnalyzer(filename=file_path.name, custom_policy=custom_policy_text)
+                
+                with console.status(f"[bold yellow]Analyzing {file_path.name} using local LLM...[/bold yellow]", spinner="dots"):
+                    # Await the AI's response while showing a loading animation
+                    report = await analyzer.analyze(parsed_hcl=parsed_data)
+                    
+                # Phase 4: Display the results based on the chosen format strategy
+                console.print(f"[bold green]>[/bold green] Analysis complete for {file_path.name}!\n")
+                
+                if format == OutputFormat.JSON:
+                    print(JsonReporter.generate(report))
+                elif format == OutputFormat.MARKDOWN:
+                    print(MarkdownReporter.generate(report))
+                else:
+                    ConsoleReporter.print_report(report)
             
         except FileNotFoundError as e:
             console.print(f"[bold red]Error:[/bold red] {str(e)}")
